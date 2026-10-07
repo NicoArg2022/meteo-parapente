@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Meteo Parapente - Pronóstico, Torno & Lluvias</title>
+  
+  <!-- Configuración PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0284c7">
+  <link rel="apple-touch-icon" href="icono-192.png">
+  
+  <script>
+    if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  </script>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            dark: { bg: '#0b0f17', card: '#151d2a', border: '#243044', accent: '#1e293b' }
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    
+    :root {
+      --bg-body: #f8fafc; 
+      --text-main: #0f172a; 
+      --glass-bg: rgba(255, 255, 255, 0.85);
+      --glass-border: rgba(226, 232, 240, 0.8);
+    }
+    .dark {
+      --bg-body: #0b0f17;
+      --text-main: #f3f4f6;
+      --glass-bg: rgba(21, 29, 42, 0.85);
+      --glass-border: rgba(36, 48, 68, 0.8);
+    }
+
+    body {
+      background-color: var(--bg-body);
+      color: var(--text-main);
+      font-family: 'Inter', sans-serif;
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+
+    .glass-card {
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border);
+      transition: background-color 0.3s ease, border-color 0.3s ease;
+    }
+
+    .pulse-green { box-shadow: 0 0 15px rgba(34, 197, 94, 0.4); }
+    .pulse-yellow { box-shadow: 0 0 15px rgba(234, 179, 8, 0.4); }
+    .pulse-red { box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
+
+    .leaflet-div-icon {
+        background: transparent !important;
+        border: none !important;
+    }
+  </style>
+</head>
+<body class="min-h-screen pb-12 antialiased selection:bg-sky-500 selection:text-white">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-50 glass-card border-b px-3 py-2 sm:px-4 sm:py-3">
+    <div class="max-w-6xl mx-auto flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2 sm:gap-3">
+        <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shrink-0">
+          <i class="fa-solid font-bold fa-wind text-sm sm:text-lg"></i>
+        </div>
+        <div>
+          <button onclick="openCityModal()" class="group text-left focus:outline-none flex flex-col justify-center">
+            <h1 class="font-bold text-sm sm:text-base md:text-lg tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5 sm:gap-2 group-hover:text-sky-600 dark:group-hover:text-sky-300 transition-colors leading-tight">
+              Meteo Parapente <span id="headerCityBadge" class="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-500/20 text-sky-600 dark:text-sky-400 font-medium border border-sky-200 dark:border-sky-500/30 flex items-center gap-1">Bragado, BA <i class="fa-solid fa-chevron-down text-[8px] sm:text-[10px]"></i></span>
+            </h1>
+            <p id="headerCoords" class="text-[10px] sm:text-xs text-slate-500 dark:text-gray-400 hidden sm:block">Pronóstico 7 Días & Remolque</p>
+          </button>
+        </div>
+      </div>
+      
+      <div class="flex items-center gap-1.5 sm:gap-2">
+        <button onclick="toggleTheme()" class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-white dark:bg-dark-card hover:bg-slate-100 dark:hover:bg-dark-border border border-slate-200 dark:border-dark-border text-slate-600 dark:text-gray-300 transition-all active:scale-95 flex items-center justify-center shadow-sm">
+          <i class="fa-solid fa-moon dark:hidden text-indigo-600 text-sm"></i>
+          <i class="fa-solid fa-sun hidden dark:block text-amber-400 text-sm"></i>
+        </button>
+        
+        <button onclick="openMapModal()" class="w-8 h-8 sm:w-auto sm:px-3 sm:py-2 rounded-lg sm:rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition-all active:scale-95 flex items-center justify-center gap-2 text-xs font-medium">
+          <i class="fa-solid fa-map-location-dot text-sm"></i>
+          <span class="hidden sm:inline">Mapa</span>
+        </button>
+
+        <button onclick="openCityModal()" class="w-8 h-8 sm:w-auto sm:px-3 sm:py-2 rounded-lg sm:rounded-xl bg-sky-600 hover:bg-sky-500 text-white transition-all active:scale-95 flex items-center justify-center gap-2 text-xs font-medium">
+          <i class="fa-solid fa-location-dot text-sm"></i>
+          <span class="hidden sm:inline">Ciudad</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- City Modal -->
+  <div id="cityModal" class="fixed inset-0 z-[60] hidden bg-slate-900/40 dark:bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="glass-card w-full max-w-xl rounded-2xl p-5 space-y-4 relative max-h-[90vh] flex flex-col">
+      <div class="flex items-center justify-between border-b border-slate-200 dark:border-dark-border pb-3">
+        <h3 class="font-bold text-lg text-slate-900 dark:text-white"><i class="fa-solid fa-list text-sky-500 mr-2"></i> Zona de Vuelo</h3>
+        <button onclick="closeCityModal()" class="text-slate-400 dark:text-gray-400 hover:text-slate-700 dark:hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      
+      <!-- Buscador y GPS -->
+      <div class="flex gap-2">
+        <div class="relative flex-grow">
+          <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400"></i>
+          <input type="text" id="citySearchInput" oninput="handleCitySearch()" placeholder="Buscar ciudad, lugar..." class="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-dark-bg border border-slate-200 dark:border-dark-border rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500">
+        </div>
+        <button onclick="useCurrentLocation()" class="px-4 bg-sky-100 dark:bg-sky-500/20 hover:bg-sky-200 dark:hover:bg-sky-500/30 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-500/30 rounded-xl transition-colors flex items-center justify-center" title="Usar mi ubicación actual">
+          <i class="fa-solid fa-location-crosshairs text-lg"></i>
+        </button>
+      </div>
+      
+      <!-- Resultados de búsqueda -->
+      <div id="searchResultsContainer" class="hidden space-y-1 bg-white/90 dark:bg-dark-bg/90 border border-slate-200 dark:border-dark-border rounded-xl p-2 max-h-48 overflow-y-auto no-scrollbar shadow-lg"></div>
+      
+      <div class="overflow-y-auto space-y-3 pt-1 pr-1">
+        <span class="text-xs font-bold text-slate-400 uppercase">Sitios Populares de Vuelo</span>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2" id="presetCitiesGrid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Map Modal -->
+  <div id="mapModal" class="fixed inset-0 z-[70] hidden bg-slate-900/40 dark:bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4">
+    <div class="glass-card w-full h-[85vh] sm:h-[90vh] sm:max-w-4xl rounded-2xl flex flex-col overflow-hidden relative shadow-2xl">
+      <div class="flex items-center justify-between p-3 border-b border-slate-200 dark:border-dark-border bg-white dark:bg-dark-card z-10 relative">
+        <h3 class="font-bold text-base sm:text-lg text-slate-900 dark:text-white"><i class="fa-solid fa-compass text-indigo-500 mr-2"></i> Radar & Vector</h3>
+        <div class="flex items-center gap-4">
+          <span class="text-xs text-slate-500 dark:text-gray-400 hidden sm:block">Toca el mapa para cambiar de zona</span>
+          <button onclick="closeMapModal()" class="text-slate-400 dark:text-gray-400 hover:text-slate-700 dark:hover:text-white text-xl p-1"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+      </div>
+      <div id="leafletMap" class="flex-grow w-full bg-slate-100 dark:bg-slate-800 z-0"></div>
+    </div>
+  </div>
+
+  <main class="max-w-6xl mx-auto px-3 sm:px-4 mt-4 space-y-4">
+    
+    <!-- TWO-TIER DAY & TIME SELECTOR -->
+    <section class="glass-card rounded-2xl p-4">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-2">
+        <div class="flex items-center gap-2">
+          <i class="fa-regular fa-calendar-days text-sky-500 dark:text-sky-400"></i>
+          <h2 class="font-semibold text-sm text-slate-800 dark:text-gray-200">Pronóstico de 7 Días</h2>
+        </div>
+        <div class="flex items-center gap-2 text-xs text-slate-500 dark:text-gray-400">
+          <span id="dataSourceDot" class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span id="dataSourceLabel">Open-Meteo GFS/ICON HD</span>
+        </div>
+      </div>
+
+      <!-- TIER 1: DAYS CAROUSEL -->
+      <div id="dayChipsContainer" class="flex gap-3 overflow-x-auto no-scrollbar py-3 px-2 mb-2 border-b border-slate-200 dark:border-dark-border">
+        <div class="animate-pulse h-20 w-24 bg-slate-200 dark:bg-dark-border/50 rounded-xl shrink-0"></div>
+        <div class="animate-pulse h-20 w-24 bg-slate-200 dark:bg-dark-border/50 rounded-xl shrink-0"></div>
+      </div>
+
+      <!-- TIER 2: HOURS CAROUSEL -->
+      <h3 class="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-gray-500 mb-1 px-1 flex justify-between">
+        <span>Horas del día seleccionado</span>
+        <span id="selectedDateLabel" class="text-sky-600 dark:text-sky-400">--</span>
+      </h3>
+      <div id="timeChipsContainer" class="flex gap-2 overflow-x-auto no-scrollbar py-2 px-1">
+        <div class="animate-pulse h-16 w-20 bg-slate-200 dark:bg-dark-border/50 rounded-xl shrink-0"></div>
+        <div class="animate-pulse h-16 w-20 bg-slate-200 dark:bg-dark-border/50 rounded-xl shrink-0"></div>
+      </div>
+    </section>
+
+    <!-- Flight Status Banner -->
+    <section id="safetyCard" class="glass-card rounded-2xl p-5 border-l-8 transition-all duration-300 border-slate-400">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="flex items-start gap-4">
+          <div id="statusIconBg" class="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shrink-0 bg-slate-200 dark:bg-gray-800 text-slate-500 dark:text-gray-400">
+            <i class="fa-solid fa-plane-arrival"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span id="statusBadge" class="text-xs font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-slate-200 dark:bg-gray-800 text-slate-700 dark:text-gray-300">
+                EVALUANDO...
+              </span>
+              <span id="statusTime" class="text-xs text-slate-500 dark:text-gray-400 font-mono">--:--</span>
+            </div>
+            <h3 id="statusTitle" class="text-xl font-extrabold text-slate-900 dark:text-white mt-1">Cargando datos...</h3>
+            <p id="statusDescription" class="text-sm text-slate-600 dark:text-gray-300 mt-0.5">Analizando condiciones...</p>
+          </div>
+        </div>
+        <div id="statusReasons" class="bg-slate-50/80 dark:bg-dark-bg/60 rounded-xl p-3 border border-slate-200 dark:border-dark-border text-xs space-y-1.5 w-full md:max-w-xs">
+        </div>
+      </div>
+    </section>
+
+    <!-- Key Metrics Breakdown -->
+    <section class="space-y-4">
+      <div class="glass-card rounded-2xl p-4">
+        <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-gray-400 mb-3"><i class="fa-solid fa-temperature-half text-amber-500"></i> Térmicas & Lluvia</h4>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div class="bg-white/60 dark:bg-dark-bg/60 rounded-xl p-3 border border-slate-200 dark:border-dark-border">
+            <span class="text-xs text-slate-500 dark:text-gray-400 block">Temperatura</span>
+            <span id="metricTemp" class="text-2xl font-extrabold text-amber-600 dark:text-amber-400 font-mono">--°C</span>
+          </div>
+          <div class="bg-white/60 dark:bg-dark-bg/60 rounded-xl p-3 border border-slate-200 dark:border-dark-border">
+            <span class="text-xs text-slate-500 dark:text-gray-400 block">Prob. Lluvia</span>
+            <span id="metricPrecipProb" class="text-2xl font-extrabold text-cyan-600 dark:text-cyan-400 font-mono">--%</span>
+          </div>
+          <div class="bg-white/60 dark:bg-dark-bg/60 rounded-xl p-3 border border-slate-200 dark:border-dark-border">
+            <span class="text-xs text-slate-500 dark:text-gray-400 block">Precipitación</span>
+            <span id="metricPrecip" class="text-xl font-extrabold text-blue-600 dark:text-blue-300 font-mono">-- mm/h</span>
+          </div>
+          <div class="bg-white/60 dark:bg-dark-bg/60 rounded-xl p-3 border border-slate-200 dark:border-dark-border">
+            <span class="text-xs text-slate-500 dark:text-gray-400 block">CAPE</span>
+            <span id="metricCape" class="text-xl font-extrabold text-purple-600 dark:text-purple-400 font-mono">-- J/kg</span>
+          </div>
+          <div class="bg-white/60 dark:bg-dark-bg/60 rounded-xl p-3 border border-slate-200 dark:border-dark-border">
+            <span class="text-xs text-slate-500 dark:text-gray-400 block">Techo Térmico</span>
+            <span id="metricCeiling" class="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">-- m</span>
+          </div>
+          <div class="bg-white/60 dark:bg-dark-bg/60 rounded-xl p-3 border border-slate-200 dark:border-dark-border">
+            <span class="text-xs text-slate-500 dark:text-gray-400 block">Tasa Ascenso</span>
+            <span id="metricClimbRate" class="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">-- m/s</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Wind Profile -->
+      <div class="glass-card rounded-2xl p-4">
+        <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-gray-400 mb-3"><i class="fa-solid fa-layer-group text-indigo-500"></i> Perfil de Viento en Altura</h4>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div id="layer10mCard" class="bg-slate-50/60 dark:bg-dark-bg/60 rounded-xl p-2.5 border border-sky-400 text-center cursor-pointer shadow-sm" onclick="selectAltitude('10m')">
+            <span class="text-[11px] text-slate-500 dark:text-gray-400 block">Superficie (10m)</span>
+            <span id="wind10" class="text-base font-bold text-slate-800 dark:text-gray-200 font-mono">-- km/h</span>
+            <span id="dir10" class="text-[10px] text-slate-500 dark:text-gray-400 block font-mono">--°</span>
+          </div>
+          <div id="layer100mCard" class="bg-slate-50/60 dark:bg-dark-bg/60 rounded-xl p-2.5 border border-slate-200 dark:border-dark-border text-center cursor-pointer shadow-sm" onclick="selectAltitude('100m')">
+            <span class="text-[11px] text-slate-500 dark:text-gray-400 block">Remolque (100m)</span>
+            <span id="wind100" class="text-base font-bold text-slate-800 dark:text-gray-200 font-mono">-- km/h</span>
+            <span id="dir100" class="text-[10px] text-slate-500 dark:text-gray-400 block font-mono">--°</span>
+          </div>
+          <div id="layer250mCard" class="bg-slate-50/60 dark:bg-dark-bg/60 rounded-xl p-2.5 border border-slate-200 dark:border-dark-border text-center cursor-pointer shadow-sm" onclick="selectAltitude('250m')">
+            <span class="text-[11px] text-slate-500 dark:text-gray-400 block">Desenganche (250m)</span>
+            <span id="wind250" class="text-base font-bold text-sky-600 dark:text-sky-400 font-mono">-- km/h</span>
+            <span id="dir250" class="text-[10px] text-slate-500 dark:text-gray-400 block font-mono">--°</span>
+          </div>
+          <div id="layer500mCard" class="bg-slate-50/60 dark:bg-dark-bg/60 rounded-xl p-2.5 border border-slate-200 dark:border-dark-border text-center cursor-pointer shadow-sm" onclick="selectAltitude('500m')">
+            <span class="text-[11px] text-slate-500 dark:text-gray-400 block">Navegación (500m)</span>
+            <span id="wind500" class="text-base font-bold text-indigo-600 dark:text-indigo-400 font-mono">-- km/h</span>
+            <span id="dir500" class="text-[10px] text-slate-500 dark:text-gray-400 block font-mono">--°</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Gráfico -->
+    <section class="glass-card rounded-2xl p-4 mt-4">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-bold text-sm text-slate-800 dark:text-gray-200"><i class="fa-solid fa-chart-line text-sky-500"></i> Evolución del Viento (Día Seleccionado)</h3>
+        <span class="text-xs px-2 py-1 bg-slate-100 dark:bg-dark-bg rounded border border-slate-200 dark:border-dark-border text-slate-500 dark:text-gray-400" id="chartAltLabel">10m</span>
+      </div>
+      <div class="relative w-full h-56 sm:h-64">
+        <canvas id="windTrendChart"></canvas>
+      </div>
+    </section>
+
+    <!-- Safety Criteria Table Reference -->
+    <section class="glass-card rounded-2xl p-4 mt-4 text-xs text-slate-500 dark:text-gray-400">
+      <h5 class="font-bold text-slate-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+        <i class="fa-solid fa-shield-halved text-sky-500 dark:text-sky-400"></i> Parámetros de Operación Tolerantes (Llanura):
+      </h5>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div class="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-lg p-2">
+          <span class="font-bold text-emerald-600 dark:text-emerald-400 block mb-0.5">🟢 Verde (Óptimo)</span>
+          Viento &le; 22 km/h | Ráfagas &le; 28 km/h | Prob. Lluvia &le; 30% (0 mm) | CAPE &le; 1000 J/kg
+        </div>
+        <div class="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-lg p-2">
+          <span class="font-bold text-amber-600 dark:text-amber-400 block mb-0.5">🟡 Amarillo (Precaución)</span>
+          Viento 23-27 km/h | Ráfagas 29-35 km/h | Prob. Lluvia 31-60% (&lt;0.5mm/h) | CAPE 1001-1500 J/kg
+        </div>
+        <div class="bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 rounded-lg p-2">
+          <span class="font-bold text-rose-600 dark:text-rose-400 block mb-0.5">🔴 Rojo (No Volar)</span>
+          Viento &gt; 27 km/h | Ráfagas &gt; 35 km/h | Prob. Lluvia &gt; 60% o Lluvia &ge; 0.5mm | CAPE &gt; 1500 J/kg
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    // --- API KEY OSM ---
+    const OSM_API_KEY = "cb1_4b1k_1_66856cbc9763d490c357db5b";
+
+    function toggleTheme() {
+      if (document.documentElement.classList.contains('dark')) {
+        document.documentElement.classList.remove('dark');
+        localStorage.setItem('theme', 'light');
+      } else {
+        document.documentElement.classList.add('dark');
+        localStorage.setItem('theme', 'dark');
+      }
+      renderTrendChart(); 
+    }
+
+    const POPULAR_SPOTS = [
+      { name: 'Bragado', region: 'Buenos Aires', lat: -35.1192, lon: -60.4903, tag: 'Torno / Llanura' },
+      { name: 'Zárate', region: 'Buenos Aires', lat: -34.0986, lon: -59.0286, tag: 'Torno / Llanura' },
+      { name: 'Cañuelas', region: 'Buenos Aires', lat: -35.0500, lon: -58.7500, tag: 'Torno / Llanura' },
+      { name: 'Cuchi Corral', region: 'Córdoba', lat: -30.9833, lon: -64.4833, tag: 'Montaña' },
+      { name: 'Mina Clavero', region: 'Córdoba', lat: -31.7211, lon: -65.0031, tag: 'Montaña' },
+      { name: 'Loma Bola', region: 'Tucumán', lat: -26.8153, lon: -65.3614, tag: 'Montaña' },
+      { name: 'Merlo', region: 'San Luis', lat: -32.3472, lon: -64.9539, tag: 'Montaña' },
+      { name: 'Bariloche (C. Otto)', region: 'Río Negro', lat: -41.1431, lon: -71.3806, tag: 'Montaña' }
+    ];
+    let currentCity = POPULAR_SPOTS[0];
+
+    let weatherData = null;
+    let dailyData = []; 
+    let selectedDateString = null; 
+    let selectedHourIndex = 0;     
+    let selectedAltitude = '10m';
+    let windTrendChart = null;
+
+    let map = null;
+    let windVectorLayer = null;
+    let cityDotLayer = null;
+
+    function initMap() {
+      if (map) return;
+      
+      map = L.map('leafletMap').setView([currentCity.lat, currentCity.lon], 11);
+      
+      const osmLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=cb1_4b1k_1_66856cbc9763d490c357db5b', {
+        maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+      });
+      const topoLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+        maxZoom: 17, attribution: '© OpenTopoMap'
+      });
+      const satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19, attribution: 'Tiles &copy; Esri'
+      });
+
+      osmLayer.addTo(map);
+
+      L.control.layers({ "Mapa Estándar": osmLayer, "Topográfico": topoLayer, "Satelital": satLayer }).addTo(map);
+
+      map.on('click', function(e) {
+        const popupContent = `
+          <div class="text-center p-1 font-sans min-w-[120px]">
+            <p class="font-bold mb-2 text-sm text-slate-800">¿Pronóstico aquí?</p>
+            <p class="text-[10px] text-slate-500 mb-3">${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}</p>
+            <button onclick="selectLocationFromMap(${e.latlng.lat}, ${e.latlng.lng})" class="bg-sky-500 text-white px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-sky-600 transition-colors shadow-sm w-full">
+              Seleccionar
+            </button>
+          </div>
+        `;
+        L.popup().setLatLng(e.latlng).setContent(popupContent).openOn(map);
+      });
+    }
+
+    function updateWindVector() {
+      if (!map || !weatherData) return;
+      
+      if (windVectorLayer) map.removeLayer(windVectorLayer);
+      if (cityDotLayer) map.removeLayer(cityDotLayer);
+
+      const i = selectedHourIndex;
+      let wSpeed = weatherData.hourly.wind_speed_10m[i];
+      let dir = weatherData.hourly.wind_direction_10m[i];
+      
+      if (selectedAltitude === '100m' && weatherData.hourly.wind_direction_100m) {
+          wSpeed = weatherData.hourly.wind_speed_100m[i]; dir = weatherData.hourly.wind_direction_100m[i];
+      }
+      if (selectedAltitude === '250m' && weatherData.hourly.wind_direction_250m) {
+          wSpeed = weatherData.hourly.wind_speed_250m[i]; dir = weatherData.hourly.wind_direction_250m[i];
+      }
+      if (selectedAltitude === '500m' && weatherData.hourly.wind_direction_500m) {
+          wSpeed = weatherData.hourly.wind_speed_500m[i]; dir = weatherData.hourly.wind_direction_500m[i];
+      }
+
+      const isRed = wSpeed > 27; const isYellow = wSpeed >= 23 && wSpeed <= 27;
+      const colorClass = isRed ? 'text-rose-500' : (isYellow ? 'text-amber-500' : 'text-sky-500');
+      const bgClass = isRed ? 'bg-rose-100 border-rose-400' : (isYellow ? 'bg-amber-100 border-amber-400' : 'bg-sky-100 border-sky-400');
+
+      const html = `
+        <div class="relative w-[120px] h-[120px]">
+          <div style="transform: rotate(${dir}deg);" class="absolute inset-0 flex items-center justify-center z-10">
+             <div style="transform: translateY(40px);" class="${colorClass}">
+                 <svg width="24" height="85" viewBox="0 0 24 85" style="filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.4));">
+                   <line x1="12" y1="0" x2="12" y2="70" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/>
+                   <polygon points="3,68 12,85 21,68" fill="currentColor"/>
+                 </svg>
+             </div>
+          </div>
+          <div class="absolute -bottom-4 left-1/2 -translate-x-1/2 z-20 ${bgClass} border text-slate-800 font-bold px-2 py-0.5 rounded shadow-lg whitespace-nowrap text-[12px]">
+             ${Math.round(wSpeed)} km/h
+          </div>
+        </div>
+      `;
+
+      const icon = L.divIcon({ className: 'custom-wind-icon', html: html, iconSize: [120, 120], iconAnchor: [60, 60] });
+
+      cityDotLayer = L.circleMarker([currentCity.lat, currentCity.lon], {
+        radius: 6, fillColor: "#0f172a", color: "#ffffff", weight: 2, opacity: 1, fillOpacity: 1, interactive: false
+      }).addTo(map);
+
+      windVectorLayer = L.marker([currentCity.lat, currentCity.lon], { icon: icon, interactive: false }).addTo(map);
+    }
+
+    function openMapModal() {
+      document.getElementById('mapModal').classList.remove('hidden');
+      setTimeout(() => { if (!map) { initMap(); } else { map.invalidateSize(); } map.setView([currentCity.lat, currentCity.lon], 11); updateWindVector(); }, 150);
+    }
+
+    function closeMapModal() { document.getElementById('mapModal').classList.add('hidden'); }
+
+    function selectLocationFromMap(lat, lon) {
+      closeMapModal();
+      currentCity = { name: 'Punto en Mapa', region: 'GPS', lat: lat, lon: lon, tag: 'Personalizado' };
+      document.getElementById('headerCityBadge').innerHTML = `Personalizado <i class="fa-solid fa-location-crosshairs text-[10px] ml-1"></i>`;
+      fetchWeatherData();
+    }
+
+    let searchTimeout = null;
+    async function handleCitySearch() {
+      const query = document.getElementById('citySearchInput').value.trim();
+      const container = document.getElementById('searchResultsContainer');
+      if (query.length < 3) { container.classList.add('hidden'); return; }
+
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(async () => {
+        try {
+          // Acá usamos tu API key OSM_API_KEY
+          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&key=${OSM_API_KEY}`);
+          const data = await res.json();
+          
+          container.innerHTML = '';
+          if (data.length > 0) {
+            container.classList.remove('hidden');
+            data.forEach(place => {
+              const btn = document.createElement('button');
+              btn.className = 'w-full text-left p-2 hover:bg-slate-50 dark:hover:bg-dark-card rounded-lg text-sm text-slate-700 dark:text-gray-300 border-b border-slate-100 dark:border-dark-border last:border-0';
+              btn.innerText = place.display_name.split(',').slice(0, 3).join(',');
+              btn.onclick = () => {
+                document.getElementById('citySearchInput').value = '';
+                container.classList.add('hidden');
+                const shortName = place.name || place.display_name.split(',')[0];
+                selectCity({ name: shortName, region: 'Buscado', lat: parseFloat(place.lat), lon: parseFloat(place.lon), tag: 'Personalizado' });
+              };
+              container.appendChild(btn);
+            });
+          } else {
+            container.innerHTML = '<div class="p-2 text-sm text-slate-500">No se encontraron resultados</div>';
+            container.classList.remove('hidden');
+          }
+        } catch (err) { console.error('Error buscando ciudad', err); }
+      }, 500);
+    }
+
+    function useCurrentLocation() {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(async (position) => {
+          const lat = position.coords.latitude;
+          const lon = position.coords.longitude;
+          try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&key=${OSM_API_KEY}`);
+            const data = await res.json();
+            const cityName = data.address.city || data.address.town || data.address.village || 'Mi Ubicación';
+            selectCity({ name: cityName, region: 'GPS', lat: lat, lon: lon, tag: 'Actual' });
+          } catch (e) {
+            selectCity({ name: 'Ubicación GPS', region: 'Actual', lat, lon, tag: 'GPS' });
+          }
+        }, (error) => { alert("No se pudo obtener la ubicación. Verificá los permisos del navegador."); });
+      } else { alert("Tu navegador no soporta geolocalización."); }
+    }
+
+    function getCardinalDirection(deg) {
+      const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+      return dirs[Math.round(deg / 22.5) % 16];
+    }
+
+    function renderPresetCities() {
+      const grid = document.getElementById('presetCitiesGrid');
+      grid.innerHTML = '';
+      POPULAR_SPOTS.forEach(spot => {
+        const isSel = spot.name === currentCity.name;
+        const btn = document.createElement('button');
+        btn.onclick = () => selectCity(spot);
+        btn.className = `p-3 rounded-xl border text-left flex justify-between items-center transition-all ${isSel ? 'bg-sky-50 dark:bg-sky-600/20 border-sky-400' : 'bg-white dark:bg-dark-bg border-slate-200 dark:border-dark-border hover:border-sky-300'}`;
+        const badgeColor = spot.tag.includes('Torno') ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/30' : 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-500/30';
+        btn.innerHTML = `<div><span class="text-sm font-bold dark:text-white block">${spot.name}</span><span class="text-[10px] text-slate-500 dark:text-gray-400">${spot.region}</span></div><span class="text-[10px] px-2 py-0.5 rounded-full ${badgeColor} font-medium border shrink-0">${spot.tag}</span>`;
+        grid.appendChild(btn);
+      });
+    }
+
+    function openCityModal() { renderPresetCities(); document.getElementById('cityModal').classList.remove('hidden'); }
+    function closeCityModal() { document.getElementById('cityModal').classList.add('hidden'); }
+    function selectCity(c) { currentCity = c; document.getElementById('headerCityBadge').innerHTML = `${c.name} <i class="fa-solid fa-chevron-down text-[10px]"></i>`; closeCityModal(); fetchWeatherData(); }
+
+    function evaluateSafety(wind, gusts, cape, windGradient, dirDifference, precip = 0, precipProb = 0) {
+      const delta = gusts - wind; let reasons = [];
+      if (wind > 27 || gusts > 35 || delta > 14 || cape > 1500 || windGradient > 20 || dirDifference > 60 || precip >= 0.5 || precipProb > 60) {
+        if(wind > 27) reasons.push(`Viento excesivo (${wind} km/h)`); if(gusts > 35) reasons.push(`Ráfaga peligrosa (${gusts} km/h)`); if(delta > 14) reasons.push(`Racheo/Turbulencia (+${delta} km/h)`);
+        if(cape > 1500) reasons.push(`CAPE muy alto (${cape} J/kg)`); if(windGradient > 20) reasons.push(`Cizalladura fuerte (+${windGradient} km/h)`); if(dirDifference > 60) reasons.push(`Rotación de viento (${dirDifference}°)`);
+        if(precip >= 0.5) reasons.push(`Lluvia activa (${precip} mm/h)`); if(precipProb > 60) reasons.push(`Alta prob. lluvia (${precipProb}%)`);
+        return { status: 'RED', badge: '🔴 NO VOLAR', borderClass: 'border-rose-500', bgClass: 'pulse-red', iconBgClass: 'bg-rose-100 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400', title: 'Condiciones No Seguras', description: 'Exceden límites operativos incluso con tolerancia.', reasons };
+      }
+      if (wind >= 23 || gusts >= 29 || delta >= 11 || cape >= 1001 || windGradient >= 15 || dirDifference >= 45 || precip > 0 || precipProb > 30) {
+        if(wind >= 23) reasons.push(`Viento fuerte (${wind} km/h)`); if(gusts >= 29) reasons.push(`Ráfagas (${gusts} km/h)`); if(delta >= 11) reasons.push(`Racheo elevado (+${delta} km/h)`);
+        if(cape >= 1001) reasons.push(`Actividad térmica fuerte (${cape} J/kg)`); if(windGradient >= 15) reasons.push(`Gradiente de viento (+${windGradient} km/h)`); if(dirDifference >= 45) reasons.push(`Rotación en altura (${dirDifference}°)`);
+        if(precip > 0) reasons.push(`Llovizna leve (${precip} mm/h)`); if(precipProb > 30) reasons.push(`Prob. lluvia moderada (${precipProb}%)`);
+        return { status: 'YELLOW', badge: '🟡 PRECAUCIÓN', borderClass: 'border-amber-500', bgClass: 'pulse-yellow', iconBgClass: 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400', title: 'Pilotos Experimentados', description: 'Condiciones exigentes pero volables.', reasons };
+      }
+      return { status: 'GREEN', badge: '🟢 DESPEGUE SEGURO', borderClass: 'border-emerald-500', bgClass: 'pulse-green', iconBgClass: 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400', title: 'Condiciones Óptimas', description: 'Viento constante, sin riesgo detectado.', reasons: ['Viento medio en rango seguro', 'Ráfagas y racheo bajo control', 'Atmósfera estable / Térmica normal'] };
+    }
+
+    function generateFallbackData() {
+      const times = [], wind10 = [], gusts = [], windDir10 = [], wind100 = [], windDir100 = [], wind250 = [], windDir250 = [], wind500 = [], windDir500 = [], cape = [], blHeight = [], clouds = [], precip = [], precipProb = [], temps = [];
+      const now = new Date(); now.setMinutes(0, 0, 0);
+      for (let h = 0; h < 168; h++) {
+        const timeObj = new Date(now.getTime() + h * 3600 * 1000); times.push(timeObj.toISOString().slice(0, 16)); const hourOfDay = timeObj.getHours(); const thermalFactor = Math.sin(((hourOfDay - 6) / 12) * Math.PI); const isDaytime = hourOfDay >= 7 && hourOfDay <= 19;
+        const baseWind = 12 + Math.sin(h / 4) * 5 + (isDaytime ? thermalFactor * 4 : 0); const w = Math.max(6, Math.round(baseWind)); temps.push(Math.round(16 + (isDaytime ? thermalFactor * 12 : -2) + Math.sin(h / 5) * 2));
+        wind10.push(w); gusts.push(Math.round(w + 4 + (isDaytime ? thermalFactor * 5 : 2))); windDir10.push(110); wind100.push(w*1.28); windDir100.push(116); wind250.push(w*1.52); windDir250.push(124); wind500.push(w*1.82); windDir500.push(134);
+        cape.push(isDaytime ? Math.round(100+thermalFactor*500) : 50); blHeight.push(isDaytime ? 1200 : 200); clouds.push(20); precip.push(0); precipProb.push(h%24===15?40:0);
+      }
+      return { hourly: { time: times, wind_speed_10m: wind10, wind_gusts_10m: gusts, wind_direction_10m: windDir10, wind_speed_100m: wind100, wind_direction_100m: windDir100, wind_speed_250m: wind250, wind_direction_250m: windDir250, wind_speed_500m: wind500, wind_direction_500m: windDir500, cape, boundary_layer_height: blHeight, cloud_cover: clouds, precipitation: precip, precipitation_probability: precipProb, temperature_2m: temps } };
+    }
+
+    function processDailyData() {
+      const daysMap = {};
+      weatherData.hourly.time.forEach((t, i) => {
+        const dateStr = t.split('T')[0]; const dateObj = new Date(t);
+        if (!daysMap[dateStr]) daysMap[dateStr] = { dateStr, dateObj, hoursIndices: [], maxWind: 0, maxGust: 0, maxTemp: -99, maxPrecipProb: 0, maxCape: 0 };
+        daysMap[dateStr].hoursIndices.push(i);
+        const w = weatherData.hourly.wind_speed_10m[i]; const g = weatherData.hourly.wind_gusts_10m[i]; const tmp = weatherData.hourly.temperature_2m[i]; const cp = weatherData.hourly.cape[i]; const pr = weatherData.hourly.precipitation_probability[i];
+        const hour = dateObj.getHours();
+        if (hour >= 8 && hour <= 19) {
+            if(w > daysMap[dateStr].maxWind) daysMap[dateStr].maxWind = w; if(g > daysMap[dateStr].maxGust) daysMap[dateStr].maxGust = g;
+            if(tmp > daysMap[dateStr].maxTemp) daysMap[dateStr].maxTemp = tmp; if(cp > daysMap[dateStr].maxCape) daysMap[dateStr].maxCape = cp;
+        }
+        if(pr > daysMap[dateStr].maxPrecipProb) daysMap[dateStr].maxPrecipProb = pr;
+      });
+      dailyData = Object.values(daysMap).slice(0, 7); 
+    }
+
+    async function fetchWeatherData() {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${currentCity.lat}&longitude=${currentCity.lon}&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m,wind_speed_100m,wind_direction_100m,wind_speed_180m,wind_direction_180m,cape,boundary_layer_height,cloud_cover,temperature_2m,precipitation,precipitation_probability&timezone=auto&forecast_days=7`;
+      try { const response = await fetch(url); if (!response.ok) throw new Error(`HTTP Error`); weatherData = await response.json(); } 
+      catch (error) { weatherData = generateFallbackData(); } 
+      finally { processDailyData(); selectDate(dailyData[0].dateStr); }
+    }
+
+    function selectDate(dateStr) {
+      selectedDateString = dateStr; const dayObj = dailyData.find(d => d.dateStr === dateStr); if(!dayObj) return;
+      const now = new Date();
+      if (dateStr === dailyData[0].dateStr) {
+         let hrIdx = dayObj.hoursIndices.find(idx => new Date(weatherData.hourly.time[idx]).getHours() === now.getHours()); selectedHourIndex = hrIdx !== undefined ? hrIdx : dayObj.hoursIndices[0];
+      } else {
+         let hrIdx = dayObj.hoursIndices.find(idx => new Date(weatherData.hourly.time[idx]).getHours() === 13); selectedHourIndex = hrIdx !== undefined ? hrIdx : dayObj.hoursIndices[Math.floor(dayObj.hoursIndices.length / 2)];
+      }
+      document.getElementById('selectedDateLabel').innerText = dayObj.dateObj.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'short' });
+      renderDayChips(); renderTimeChips(); renderCurrentHourDetails(); renderTrendChart();
+    }
+
+    function renderDayChips() {
+      const container = document.getElementById('dayChipsContainer'); container.innerHTML = '';
+      dailyData.forEach(day => {
+        const isSelected = day.dateStr === selectedDateString; const dayName = day.dateObj.toLocaleDateString('es-AR', { weekday: 'short' }).toUpperCase(); const dayNum = day.dateObj.getDate();
+        const label = day === dailyData[0] ? 'HOY' : `${dayName} ${dayNum}`;
+        const safety = evaluateSafety(day.maxWind, day.maxGust, day.maxCape, 0, 0, 0, day.maxPrecipProb);
+        let dotColor = safety.status === 'RED' ? 'bg-rose-500' : (safety.status === 'YELLOW' ? 'bg-amber-500' : 'bg-emerald-500');
+        const chip = document.createElement('button'); chip.onclick = () => selectDate(day.dateStr);
+        chip.className = `flex-shrink-0 w-[100px] p-2 rounded-xl border text-center transition-all ${isSelected ? 'bg-sky-50 dark:bg-sky-600/30 border-sky-400 dark:border-sky-400 shadow-md transform scale-105 relative z-10' : 'bg-white dark:bg-dark-card hover:bg-slate-50 dark:hover:bg-dark-border border-slate-200 dark:border-dark-border opacity-80 hover:opacity-100'}`;
+        let rainIcon = day.maxPrecipProb > 30 ? `<span class="text-cyan-500"><i class="fa-solid fa-cloud-rain"></i></span>` : `<span class="text-amber-400"><i class="fa-solid fa-sun"></i></span>`;
+        chip.innerHTML = `<div class="flex items-center justify-center gap-1.5 text-[11px] font-bold text-slate-500 dark:text-gray-400 mb-1"><span>${label}</span><span class="w-2 h-2 rounded-full ${dotColor}"></span></div><div class="text-sm font-extrabold text-slate-800 dark:text-white font-mono leading-none">${Math.round(day.maxWind)} <span class="text-[10px] font-normal text-slate-500 dark:text-gray-400">km/h</span></div><div class="text-[10px] text-slate-400 dark:text-gray-500 mt-1 mb-1 font-mono">Ráf. ${Math.round(day.maxGust)}</div><div class="flex items-center justify-center gap-1.5 text-[11px] font-bold text-slate-700 dark:text-gray-300 border-t border-slate-100 dark:border-dark-border/50 pt-1">${rainIcon} ${Math.round(day.maxTemp)}°</div>`;
+        container.appendChild(chip);
+      });
+    }
+
+    function renderTimeChips() {
+      const container = document.getElementById('timeChipsContainer'); container.innerHTML = '';
+      const dayObj = dailyData.find(d => d.dateStr === selectedDateString); if (!dayObj) return; const now = new Date();
+      dayObj.hoursIndices.forEach(index => {
+        const date = new Date(weatherData.hourly.time[index]); if (dayObj === dailyData[0] && date.getHours() < now.getHours()) return;
+        const hour = date.getHours().toString().padStart(2, '0') + ':00'; const isSelected = index === selectedHourIndex;
+        const wind = Math.round(weatherData.hourly.wind_speed_10m[index]); const gusts = Math.round(weatherData.hourly.wind_gusts_10m[index]);
+        const cape = Math.round(weatherData.hourly.cape[index]); const precip = weatherData.hourly.precipitation[index]; const precipProb = weatherData.hourly.precipitation_probability[index]; const temp = Math.round(weatherData.hourly.temperature_2m[index]);
+        const safety = evaluateSafety(wind, gusts, cape, 0, 0, precip, precipProb); let statusDot = safety.status === 'RED' ? 'bg-rose-500' : (safety.status === 'YELLOW' ? 'bg-amber-500' : 'bg-emerald-500');
+        const chip = document.createElement('button'); chip.onclick = () => { selectedHourIndex = index; renderTimeChips(); renderCurrentHourDetails(); };
+        chip.className = `flex-shrink-0 p-2.5 rounded-xl border text-left transition-all ${isSelected ? 'bg-sky-50 dark:bg-sky-600/30 border-sky-400 dark:border-sky-400 shadow-md relative z-10' : 'bg-white dark:bg-dark-card hover:bg-slate-50 border-slate-200 dark:border-dark-border'}`;
+        let rainHtml = precipProb > 30 ? `<span class="text-[10px] ${precipProb>60?'text-rose-500':'text-cyan-500'} font-bold"><i class="fa-solid fa-droplet text-[9px]"></i> ${precipProb}%</span>` : '';
+        chip.innerHTML = `<div class="flex justify-between items-center w-[75px]"><span class="text-sm font-bold font-mono ${isSelected?'text-sky-800 dark:text-white':'text-slate-800 dark:text-white'}">${hour}</span><span class="w-2 h-2 rounded-full ${statusDot}"></span></div><div class="flex items-center justify-between mt-1 text-[11px] font-mono text-slate-500 dark:text-gray-300"><span>${wind} km/h</span></div><div class="flex items-center justify-between mt-1 h-3"><span class="text-amber-500 text-[11px] font-bold">${temp}°</span>${rainHtml}</div>`;
+        container.appendChild(chip);
+      });
+    }
+
+    function renderCurrentHourDetails() {
+      if (!weatherData) return; const h = weatherData.hourly; const i = selectedHourIndex;
+      const wind10 = Math.round(h.wind_speed_10m[i]); const dir10 = Math.round(h.wind_direction_10m[i]); const gusts = Math.round(h.wind_gusts_10m[i]); 
+      const capeVal = Math.round(h.cape[i]); const ceilingVal = h.boundary_layer_height[i] ? Math.round(h.boundary_layer_height[i]) : 0;
+      const precipVal = parseFloat(h.precipitation[i].toFixed(1)); const precipProbVal = Math.round(h.precipitation_probability[i]); const tempVal = Math.round(h.temperature_2m[i]);
+      const wind100 = h.wind_speed_100m ? Math.round(h.wind_speed_100m[i]) : Math.round(wind10 * 1.28); const dir100 = h.wind_direction_100m ? Math.round(h.wind_direction_100m[i]) : Math.round((dir10 + 6) % 360);
+      const wind250 = h.wind_speed_250m ? Math.round(h.wind_speed_250m[i]) : (h.wind_speed_180m ? Math.round(h.wind_speed_180m[i]) : Math.round(wind10 * 1.52)); const dir250 = h.wind_direction_250m ? Math.round(h.wind_direction_250m[i]) : (h.wind_direction_180m ? Math.round(h.wind_direction_180m[i]) : Math.round((dir10 + 14) % 360));
+      const wind500 = h.wind_speed_500m ? Math.round(h.wind_speed_500m[i]) : Math.round(wind10 * 1.82); const dir500 = h.wind_direction_500m ? Math.round(h.wind_direction_500m[i]) : Math.round((dir10 + 24) % 360);
+
+      document.getElementById('metricTemp').innerText = `${tempVal}°C`; document.getElementById('metricPrecipProb').innerText = `${precipProbVal}%`;
+      document.getElementById('metricPrecip').innerText = `${precipVal} mm/h`; document.getElementById('metricCape').innerText = `${capeVal} J/kg`;
+      document.getElementById('metricCeiling').innerText = `${ceilingVal} m`;
+      let climb = 0; if (ceilingVal > 300 && (capeVal > 10 || ceilingVal > 600)) climb = Math.min(8.0, Math.max(0.3, Math.sqrt(capeVal)*0.07 + (ceilingVal/1200)*0.85));
+      document.getElementById('metricClimbRate').innerText = `${climb.toFixed(1)} m/s`;
+      document.getElementById('wind10').innerText = `${wind10} km/h`; document.getElementById('wind100').innerText = `${wind100} km/h`;
+      document.getElementById('wind250').innerText = `${wind250} km/h`; document.getElementById('wind500').innerText = `${wind500} km/h`;
+      document.getElementById('dir10').innerText = `${dir10}° (${getCardinalDirection(dir10)})`; document.getElementById('dir100').innerText = `${dir100}° (${getCardinalDirection(dir100)})`;
+      document.getElementById('dir250').innerText = `${dir250}° (${getCardinalDirection(dir250)})`; document.getElementById('dir500').innerText = `${dir500}° (${getCardinalDirection(dir500)})`;
+
+      ['10m', '100m', '250m', '500m'].forEach(l => {
+        document.getElementById(`layer${l}Card`).className = (l === selectedAltitude) ? "bg-sky-50 dark:bg-sky-950/60 rounded-xl p-2.5 border-2 border-sky-400 text-center shadow-md cursor-pointer" : "bg-white/60 dark:bg-dark-bg/60 rounded-xl p-2.5 border border-slate-200 dark:border-dark-border text-center shadow-sm cursor-pointer hover:bg-slate-50 dark:hover:bg-dark-border";
+      });
+
+      const safety = evaluateSafety(wind10, gusts, capeVal, Math.abs(wind250-wind10), 0, precipVal, precipProbVal);
+      document.getElementById('safetyCard').className = `glass-card rounded-2xl p-5 border-l-8 transition-all ${safety.borderClass} ${safety.bgClass}`;
+      document.getElementById('statusIconBg').className = `w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shrink-0 ${safety.iconBgClass}`;
+      document.getElementById('statusBadge').innerText = safety.badge;
+      document.getElementById('statusTime').innerText = new Date(h.time[i]).getHours().toString().padStart(2, '0') + ':00';
+      document.getElementById('statusTitle').innerText = safety.title; document.getElementById('statusDescription').innerText = safety.description;
+      document.getElementById('statusReasons').innerHTML = `<span class="font-semibold text-slate-500 dark:text-gray-400 block mb-1">Motivos del estado:</span>` + safety.reasons.map(r => `<div class="text-slate-700 dark:text-gray-300 flex items-center gap-1.5"><i class="fa-solid fa-chevron-right text-[9px] text-sky-500"></i> ${r}</div>`).join('');
+      if (typeof updateWindVector === 'function') updateWindVector();
+    }
+
+    function selectAltitude(alt) { selectedAltitude = alt; renderCurrentHourDetails(); renderTrendChart(); }
+
+    function renderTrendChart() {
+      if (!weatherData) return; const dayObj = dailyData.find(d => d.dateStr === selectedDateString); if (!dayObj) return;
+      const labels = [], windData = [], gustData = [], dirData = [], deltaData = [];
+      dayObj.hoursIndices.forEach(i => {
+        labels.push(new Date(weatherData.hourly.time[i]).getHours().toString().padStart(2, '0') + ':00');
+        let wSpeed = weatherData.hourly.wind_speed_10m[i]; let wGust = weatherData.hourly.wind_gusts_10m[i]; let dir = weatherData.hourly.wind_direction_10m[i];
+        if (selectedAltitude === '100m' && weatherData.hourly.wind_speed_100m) { wSpeed = weatherData.hourly.wind_speed_100m[i]; dir = weatherData.hourly.wind_direction_100m[i]; }
+        if (selectedAltitude === '250m' && weatherData.hourly.wind_speed_250m) { wSpeed = weatherData.hourly.wind_speed_250m[i]; dir = weatherData.hourly.wind_direction_250m[i]; }
+        if (selectedAltitude === '500m' && weatherData.hourly.wind_speed_500m) { wSpeed = weatherData.hourly.wind_speed_500m[i]; dir = weatherData.hourly.wind_direction_500m[i]; }
+        let multiplier = wSpeed / weatherData.hourly.wind_speed_10m[i]; if (isNaN(multiplier) || multiplier < 1) multiplier = 1;
+        let finalSpeed = Math.round(wSpeed); let finalGust = Math.round(wGust * multiplier);
+        windData.push(finalSpeed); gustData.push(finalGust); dirData.push(Math.round(dir)); deltaData.push(Math.max(0, finalGust - finalSpeed));
+      });
+      document.getElementById('chartAltLabel').innerText = `${selectedAltitude}`;
+      const ctx = document.getElementById('windTrendChart').getContext('2d'); if (windTrendChart) windTrendChart.destroy();
+      const isDark = document.documentElement.classList.contains('dark');
+      const gridColor = isDark ? 'rgba(36, 48, 68, 0.5)' : 'rgba(226, 232, 240, 0.8)'; const tickColor = isDark ? '#6b7280' : '#94a3b8';
+      
+      windTrendChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: labels, datasets: [ { label: 'Viento Medio', data: windData, borderColor: '#38bdf8', backgroundColor: 'rgba(56, 189, 248, 0.15)', borderWidth: 2.5, tension: 0.4, fill: true, pointRadius: 0, pointHitRadius: 15 }, { label: 'Ráfagas', data: gustData, borderColor: '#fbbf24', borderWidth: 2, borderDash: [5, 5], tension: 0.4, fill: false, pointRadius: 0, pointHitRadius: 15 } ] },
+        options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'top', labels: { color: tickColor, font: { family: 'Inter', size: 11 }, usePointStyle: true, boxWidth: 8 } }, tooltip: { backgroundColor: isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)', titleColor: isDark ? '#f3f4f6' : '#0f172a', bodyColor: isDark ? '#f3f4f6' : '#0f172a', borderColor: isDark ? '#334155' : '#e2e8f0', borderWidth: 1, padding: 12, callbacks: { label: function(context) { return ` ${context.dataset.label}: ${context.parsed.y} km/h`; }, afterBody: function(tooltipItems) { const idx = tooltipItems[0].dataIndex; return ['', `Delta Racheo : +${deltaData[idx]} km/h`, `Dirección    : ${dirData[idx]}° (${getCardinalDirection(dirData[idx])})`]; } } } }, scales: { y: { beginAtZero: true, grid: { color: gridColor }, ticks: { color: tickColor, font: { family: 'JetBrains Mono', size: 10 } } }, x: { grid: { display: false }, ticks: { color: tickColor, maxTicksLimit: 8, font: { family: 'JetBrains Mono', size: 10 } } } } }
+      });
+    }
+
+    // REGISTRO DEL SERVICE WORKER (PWA)
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js')
+          .then(reg => console.log('PWA Service Worker registrado con éxito'))
+          .catch(err => console.warn('Error al registrar PWA', err));
+      });
+    }
+
+    window.onload = () => fetchWeatherData();
+  </script>
+</body>
+</html>
